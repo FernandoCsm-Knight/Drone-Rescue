@@ -142,6 +142,7 @@
         <div class="legend">
           <span><i class="sw" style="background:var(--signal)"></i>Drone e trajeto</span>
           <span><i class="sw" style="background:rgba(var(--heat-like),.55)"></i>Verossimilhança</span>
+          <span id="covLegend" hidden><i class="sw" style="background:var(--signal);opacity:.3"></i>Área já explorada</span>
           <span><i class="sw line" style="border-color:var(--accent)"></i>Estimativa e elipse 95%</span>
           <span><i class="sw" style="background:var(--accent);outline:2px solid var(--surface)"></i>Pessoa (ao revelar)</span>
         </div>
@@ -154,10 +155,11 @@
           <label class="ctrl" style="grid-template-columns:1fr">Estratégia de voo
             <select id="iStrat">
               <option value="fisher">Maximizar a informação de Fisher</option>
+              <option value="coverage">Cobertura com memória (1 drone + DP)</option>
               <option value="goto">Voar direto até a estimativa</option>
               <option value="random">Voo aleatório</option>
             </select></label>
-          <label class="ctrl">Drones<output id="oN2">4</output><input type="range" id="iN2" min="2" max="8" step="1" value="4"></label>
+          <label class="ctrl">Drones<output id="oN2">4</output><input type="range" id="iN2" min="1" max="8" step="1" value="4"></label>
           <label class="ctrl">Ruído do sinal σ<output id="oS2">4 dB</output><input type="range" id="iS2" min="1" max="10" step="0.5" value="4"></label>
           <div class="row">
             <button class="btn primary" id="bNext">Próxima rodada</button>
@@ -168,7 +170,7 @@
             <label class="chk"><input type="checkbox" id="iReveal"> Revelar a pessoa</label>
             <label class="chk"><input type="checkbox" id="iLike" checked> Verossimilhança</label>
           </div>
-          <p class="note">A cada rodada cada drone faz 5 medições, a pessoa é estimada por máxima verossimilhança e os drones voam no máximo 150 m.</p>
+          <p class="note" id="missionNote">A cada rodada cada drone faz 5 medições, a pessoa é estimada por máxima verossimilhança e os drones voam no máximo 150 m.</p>
         </div>
         <div class="block">
           <h3>Telemetria</h3>
@@ -177,6 +179,8 @@
             <div><dt>Medições</dt><dd id="uM">0</dd></div>
             <div><dt>Incerteza (RMS)</dt><dd id="uRms">–</dd></div>
             <div><dt>Erro real</dt><dd id="uErr">oculto</dd></div>
+            <div><dt>Área explorada</dt><dd id="uCov">–</dd></div>
+            <div><dt>Estados da DP</dt><dd id="uDp">–</dd></div>
           </dl>
         </div>
         <div class="block">
@@ -274,12 +278,18 @@
         <p>O planejamento usa a Fisher calculada na estimativa atual \(\hat p\), somando a informação já coletada:</p>
         <div class="eq">\[ \max_{q}\; \log\det\Big( F_{\text{passado}}(\hat p) + n \textstyle\sum_i F_i(q_i;\hat p) \Big) \quad \text{s.a.} \quad \lVert q_i - q_i^{\text{atual}}\rVert \le 150\ \text{m}. \]</div>
 
+        <h2>Cobertura com memória e programação dinâmica</h2>
+        <p>Um único drone também pode buscar a pessoa ao longo do tempo. O mapa é dividido em células e o conjunto \(E\) guarda permanentemente as regiões que o sensor já vasculhou. Uma célula só é eliminada da busca quando entra no raio de inspeção direta do drone; intensidade de sinal fraca, sozinha, não conta como exploração.</p>
+        <p>A estratégia usa a verossimilhança das medições como probabilidade \(P(c)\) de cada célula e planeja algumas rodadas à frente. Para posição \(x\), cobertura acumulada \(E\) e horizonte \(b\), a função de valor é</p>
+        <div class="eq">\[ V(x,E,b)=\max_{a\in A(x)}\left[\sum_{c\in C(a)\setminus E}P(c)-\lambda\,\frac{d(x,a)}{d_{\max}}+V\!\left(a,E\cup C(a),b-1\right)\right]. \]</div>
+        <p>\(C(a)\) é a região coberta ao visitar \(a\). A implementação usa uma grade de \(10\times10\), oito movimentos vizinhos, horizonte de quatro rodadas e uma máscara de bits para \(E\). Estados iguais \((x,E,b)\) são guardados por memoization, evitando recalcular subproblemas. Além da cobertura direta, as medições RSSI feitas em posições diferentes acumulam direções distintas na matriz de Fisher e tornam a localização bidimensional observável.</p>
+
         <h2>Limitações</h2>
         <div class="callout">
           <p>O sinal real de celular sofre sombreamento por relevo e vegetação, multipercurso e variação de antena, e é bem mais ruidoso que o modelo.</p>
           <p>A Fisher depende da posição verdadeira, que não é conhecida. O planejamento usa a estimativa atual e pode errar nas primeiras rodadas. Uma extensão natural é o projeto bayesiano: maximizar a média de \(\log\det F\) sobre a distribuição da posição.</p>
           <p>Cramér-Rao é um limite assintótico. Com poucas medições, o erro real pode ser maior que a elipse indica, e o app mostra os dois para comparar.</p>
-          <p>O planejamento é guloso (uma rodada à frente) e o gradiente projetado encontra ótimos locais.</p>
+          <p>O planejamento de Fisher é guloso (uma rodada à frente) e o gradiente projetado encontra ótimos locais. A cobertura usa horizonte curto: evita o custo exponencial de planejar a missão inteira, mas pode deixar de enxergar rotas melhores além de quatro rodadas.</p>
         </div>
       </article>
       <aside>
@@ -294,6 +304,7 @@
               <tr><td>Descida com otimização de comprimento</td><td>Busca de Armijo, comparada com passo fixo</td></tr>
               <tr><td>Métodos de segunda ordem</td><td>Gauss-Newton e Fisher scoring na estimação</td></tr>
               <tr><td>Métodos numéricos</td><td>Busca em grade para escapar de ótimos locais</td></tr>
+              <tr><td>Programação dinâmica</td><td>Cobertura de um drone com memória das células exploradas e memoization</td></tr>
             </tbody>
           </table>
         </div>

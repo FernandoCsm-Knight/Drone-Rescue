@@ -52,5 +52,19 @@ for (const N of [2, 4, 6]) {
   ok(s.feasible, `otimização mantém separação dura após sobreposição inicial: ${s.minDistance.toFixed(6)} m`);
 }
 
+// 5. Cobertura com memória: preserva células visitadas e a DP alcança massa provável distante
+{
+  const G = 4, L = 400, explored = new Uint8Array(G * G), weights = new Float64Array(G * G);
+  C.markCoverage(explored, G, [50, 50], 60, L);
+  ok(explored[0] === 1 && explored.reduce((a, v) => a + v, 0) === 1,
+    'memória de cobertura marca e preserva a célula vasculhada');
+  weights[15] = 1;
+  const plan = C.planCoverageRoute(weights, explored, [50, 50], { G, L, stepMax: 150, radius: 60, horizon: 4 });
+  ok(plan.route.some(p => Math.hypot(p[0] - 350, p[1] - 350) < 1e-9) && Math.hypot(plan.next[0] - 50, plan.next[1] - 50) <= 150,
+    `DP com memoization planeja rota alcançável até a região provável (${plan.memoStates} estados)`);
+  const w = C.coverageLikelihood(M, [{ q: [50, 350], n: 1, S1: -70, S2: 4900 }], G);
+  ok(Math.abs(w.reduce((a, v) => a + v, 0) - 1) < 1e-12, 'probabilidades da grade de cobertura são normalizadas');
+}
+
 if (falhas) { console.error(`${falhas} verificação(ões) falharam`); process.exit(1); }
 console.log('Todas as verificações passaram.');

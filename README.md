@@ -7,6 +7,7 @@ O app tem quatro abas:
 
 - **Posicionamento ótimo**: arraste a pessoa e os drones. O gradiente projetado com busca de Armijo leva os drones ao arranjo que maximiza log det F, com condições de KKT, elipse de Cramér-Rao e multistart para escapar de ótimos locais.
 - **Missão de busca**: a posição da pessoa é desconhecida. A cada rodada os drones medem, estimam a posição por máxima verossimilhança (Gauss-Newton, que aqui é o Fisher scoring) e replanejam o voo.
+- **Cobertura com memória**: na missão, um único drone pode guardar as células já vasculhadas e usar programação dinâmica com memoization para priorizar regiões prováveis ainda não exploradas.
 - **Comparação**: Monte Carlo entre estratégias de voo ou entre quantidades de drones lançados.
 - **Teoria**: modelo, derivações e ligação com a disciplina.
 

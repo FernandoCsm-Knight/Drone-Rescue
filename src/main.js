@@ -451,8 +451,10 @@ function applyPreset(name) {
 // =========================================================
 // ABA 2 — MISSÃO
 // =========================================================
+const COVER_G = 10, COVER_RADIUS = 90, COVER_HORIZON = 4;
 const B = { N: 4, sigma: 4, h: 100, m: 5, V: 150, dmin: 40, strat: 'fisher', seed: 0, maxR: 15,
-  target: null, qs: [], trails: [], obs: [], est: null, F: null, hist: [], round: 0, reveal: false, like: true, auto: false, anim: null, gn: null, gd: null, p0: null, likeImg: null, phase: null };
+  target: null, qs: [], trails: [], obs: [], est: null, F: null, hist: [], round: 0, reveal: false, like: true, auto: false, anim: null, gn: null, gd: null, p0: null, likeImg: null, phase: null,
+  coverage: new Uint8Array(COVER_G * COVER_G), coveragePlan: null, found: false };
 const modelB = () => C.makeModel({ sigma: B.sigma, h: B.h });
 const formB = () => OFFS.slice(0, B.N);
 function newMission(keepSeed) {
@@ -462,14 +464,19 @@ function newMission(keepSeed) {
   B.rMeas = C.rng(B.seed * 31 + 7); B.rMove = C.rng(B.seed * 17 + 3);
   B.qs = formB().map(o => [BASE[0] + o[0], BASE[1] + o[1]]);
   B.trails = B.qs.map(q => [q.slice()]); B.obs = []; B.est = null; B.F = null; B.hist = []; B.round = 0; B.gn = B.gd = B.p0 = null; B.likeImg = null; B.anim = null; B.phase = null;
+  B.coverage = new Uint8Array(COVER_G * COVER_G); B.coveragePlan = null; B.found = false;
   doRound(false);
 }
 function setPhase(p) { B.phase = p; document.querySelectorAll('#cycle span').forEach(s => s.classList.toggle('on', s.dataset.ph === p)); }
 function doRound(animate) {
-  if (B.round >= B.maxR || B.anim) return;
+  if (B.found || B.round >= B.maxR || B.anim) return;
   const M = modelB();
   setPhase('medir');
   C.measure(M, B.rMeas, B.target, B.qs, B.m, B.obs);
+  if (B.strat === 'coverage') {
+    B.qs.forEach(q => C.markCoverage(B.coverage, COVER_G, q, COVER_RADIUS, L));
+    B.found = B.qs.some(q => Math.hypot(q[0] - B.target[0], q[1] - B.target[1]) <= COVER_RADIUS);
+  }
   setPhase('estimar');
   B.p0 = C.gridSearch(M, B.obs, 60);
   B.gn = C.gaussNewton(M, B.obs, B.p0, 40);
@@ -480,8 +487,17 @@ function doRound(animate) {
   B.round++;
   B.hist.push({ rms: C.rmsBound(B.F), err: Math.hypot(B.est[0] - B.target[0], B.est[1] - B.target[1]) });
   buildLike(M);
+  if (B.found) { stopAuto(); B.coveragePlan = null; setPhase(null); drawB(); teleB(); return; }
   setPhase('planejar');
-  const next = C.planNext(M, B.strat, B.est, B.qs, B.obs, { stepMax: B.V, m: B.m, dmin: B.dmin, iters: 50, robust: true }, B.rMove, formB());
+  let next;
+  if (B.strat === 'coverage') {
+    const weights = C.coverageLikelihood(M, B.obs, COVER_G);
+    B.coveragePlan = C.planCoverageRoute(weights, B.coverage, B.qs[0], { G: COVER_G, L, stepMax: B.V, radius: COVER_RADIUS, horizon: COVER_HORIZON });
+    next = [B.coveragePlan.next];
+  } else {
+    B.coveragePlan = null;
+    next = C.planNext(M, B.strat, B.est, B.qs, B.obs, { stepMax: B.V, m: B.m, dmin: B.dmin, iters: 50, robust: true }, B.rMove, formB());
+  }
   if (animate) {
     B.anim = { from: B.qs.map(q => q.slice()), to: next, t0: performance.now(), dur: 750 };
     setPhase('voar'); requestB();
@@ -511,6 +527,26 @@ function drawB() {
   const { ctx, w } = fit(cv), s = w / L;
   drawBase(ctx, s, w);
   if (B.like && B.likeImg) { ctx.imageSmoothingEnabled = true; ctx.drawImage(B.likeImg, 0, 0, w, w); }
+  if (B.strat === 'coverage' && B.coverage) {
+    const cell = w / COVER_G;
+    ctx.fillStyle = T.signal; ctx.strokeStyle = T.signal; ctx.lineWidth = 0.7;
+    for (let i = 0; i < B.coverage.length; i++) if (B.coverage[i]) {
+      const x = (i % COVER_G) * cell, y = Math.floor(i / COVER_G) * cell;
+      ctx.globalAlpha = .12; ctx.fillRect(x, y, cell, cell);
+      ctx.globalAlpha = .24; ctx.strokeRect(x + .5, y + .5, cell - 1, cell - 1);
+    }
+    ctx.globalAlpha = 1;
+    if (B.coveragePlan && B.coveragePlan.route.length) {
+      ctx.strokeStyle = T.signal; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); ctx.globalAlpha = .75; ctx.beginPath();
+      ctx.moveTo(B.qs[0][0] * s, B.qs[0][1] * s);
+      B.coveragePlan.route.forEach(p => ctx.lineTo(p[0] * s, p[1] * s));
+      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    if (B.qs[0]) {
+      ctx.fillStyle = T.signalSoft; ctx.strokeStyle = T.signal; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(B.qs[0][0] * s, B.qs[0][1] * s, COVER_RADIUS * s, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    }
+  }
   // pontos de medição
   ctx.fillStyle = T.signal; ctx.globalAlpha = .55;
   for (const o of B.obs) { ctx.beginPath(); ctx.arc(o.q[0] * s, o.q[1] * s, 2.2, 0, 7); ctx.fill(); }
@@ -522,7 +558,7 @@ function drawB() {
     ctx.strokeStyle = T.accent; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ex - 9, ey); ctx.lineTo(ex - 3, ey); ctx.moveTo(ex + 3, ey); ctx.lineTo(ex + 9, ey); ctx.moveTo(ex, ey - 9); ctx.lineTo(ex, ey - 3); ctx.moveTo(ex, ey + 3); ctx.lineTo(ex, ey + 9); ctx.stroke();
     ctx.font = '600 11px ' + T.body; ctx.fillStyle = T.ink; ctx.textAlign = 'left'; ctx.fillText('estimativa', ex + 12, ey + 14);
   }
-  if (B.reveal && B.target) {
+  if ((B.reveal || B.found) && B.target) {
     if (B.est) { ctx.setLineDash([3, 3]); ctx.strokeStyle = T.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(B.est[0] * s, B.est[1] * s); ctx.lineTo(B.target[0] * s, B.target[1] * s); ctx.stroke(); ctx.setLineDash([]); }
     drawPerson(ctx, B.target[0] * s, B.target[1] * s, 'pessoa', true);
   }
@@ -531,7 +567,7 @@ function drawB() {
   drawInsetB();
   const x = B.hist.map((_, i) => i + 1);
   const series = [{ name: 'Incerteza (Cramér-Rao, RMS)', short: 'Cramér-Rao', color: T.sG, values: B.hist.map(h => h.rms) }];
-  if (B.reveal) series.push({ name: 'Erro real', short: 'Erro real', color: T.sF, values: B.hist.map(h => h.err) });
+  if (B.reveal || B.found) series.push({ name: 'Erro real', short: 'Erro real', color: T.sF, values: B.hist.map(h => h.err) });
   lineChart($('chartB'), { x, xName: 'Rodada', xLabel: 'rodada', yLog: true, series, fmtY: v => nf(v, v < 10 ? (v % 1 ? 1 : 0) : 0), fmtTip: v => meters(v), hover: $('chartB')._cfg ? $('chartB')._cfg.hover : null });
 }
 function drawInsetB() {
@@ -573,15 +609,27 @@ function teleB() {
   $('uM').textContent = B.obs.reduce((a, o) => a + o.n, 0);
   const h = B.hist[B.hist.length - 1];
   $('uRms').textContent = h ? '± ' + meters(h.rms) : '–';
-  $('uErr').textContent = B.reveal ? (h ? meters(h.err) : '–') : 'oculto';
-  $('hintB').textContent = B.reveal ? 'Pessoa revelada' : 'Posição da pessoa desconhecida';
-  $('bNext').disabled = B.round >= B.maxR || !!B.anim;
+  $('uErr').textContent = (B.reveal || B.found) ? (h ? meters(h.err) : '–') : 'oculto';
+  const covered = B.coverage ? B.coverage.reduce((a, v) => a + v, 0) : 0;
+  $('uCov').textContent = B.strat === 'coverage' ? nf(covered / (COVER_G * COVER_G) * 100, 0) + '%' : '–';
+  $('uDp').textContent = B.strat === 'coverage' && B.coveragePlan ? B.coveragePlan.memoStates.toLocaleString('pt-BR') : '–';
+  $('hintB').textContent = B.found ? 'Pessoa localizada pela busca direta' : B.reveal ? 'Pessoa revelada' : B.strat === 'coverage' ? 'Buscando com memória da área explorada' : 'Posição da pessoa desconhecida';
+  $('bNext').disabled = B.found || B.round >= B.maxR || !!B.anim;
+}
+function syncStrategyB() {
+  const coverage = B.strat === 'coverage', nInput = $('iN2');
+  if (coverage && B.N !== 1) { B.N = 1; nInput.value = '1'; $('oN2').textContent = '1'; }
+  nInput.disabled = coverage;
+  $('covLegend').hidden = !coverage;
+  $('missionNote').textContent = coverage
+    ? `Um drone memoriza uma grade de ${COVER_G} × ${COVER_G} células. A programação dinâmica planeja ${COVER_HORIZON} rodadas à frente e o sensor confirma a pessoa dentro de ${COVER_RADIUS} m.`
+    : 'A cada rodada cada drone faz 5 medições, a pessoa é estimada por máxima verossimilhança e os drones voam no máximo 150 m.';
 }
 function bindB() {
   const rng = (id, out, key, fmt) => { const el = $(id); const upd = () => { B[key] = Number(el.value); $(out).textContent = fmt(B[key]); }; el.addEventListener('input', () => { upd(); stopAuto(); newMission(true); }); upd(); };
   rng('iN2', 'oN2', 'N', v => v);
   rng('iS2', 'oS2', 'sigma', v => nf(v, v % 1 ? 1 : 0) + ' dB');
-  $('iStrat').addEventListener('change', e => { B.strat = e.target.value; stopAuto(); newMission(true); });
+  $('iStrat').addEventListener('change', e => { B.strat = e.target.value; syncStrategyB(); stopAuto(); newMission(true); });
   $('bNext').addEventListener('click', () => doRound(true));
   $('bNew').addEventListener('click', () => { stopAuto(); newMission(false); });
   $('bAuto').addEventListener('click', () => {
@@ -591,6 +639,7 @@ function bindB() {
   });
   $('iReveal').addEventListener('change', e => { B.reveal = e.target.checked; drawB(); teleB(); });
   $('iLike').addEventListener('change', e => { B.like = e.target.checked; drawB(); });
+  syncStrategyB();
 }
 
 // =========================================================

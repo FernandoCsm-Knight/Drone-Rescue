@@ -325,6 +325,87 @@ function sigmaCloud(M, pHat, obs, cap) {
   for (const c of pts) c.base = pastFisher(M, [pHat[0] + c.d[0], pHat[1] + c.d[1]], obs);
   return pts;
 }
+
+// ===== Cobertura com memória e programação dinâmica =====
+// O mapa é discretizado em G×G células. `explored` persiste entre rodadas;
+// a DP memoriza estados (célula, máscara coberta, horizonte) durante cada plano.
+function cellCenter(index, G, L) {
+  const size = L / G, x = index % G, y = Math.floor(index / G);
+  return [(x + 0.5) * size, (y + 0.5) * size];
+}
+function coverageMaskAt(p, G, L, radius) {
+  let mask = 0n;
+  for (let i = 0; i < G * G; i++) {
+    const c = cellCenter(i, G, L);
+    if (Math.hypot(c[0] - p[0], c[1] - p[1]) <= radius) mask |= 1n << BigInt(i);
+  }
+  return mask;
+}
+function exploredMask(explored) {
+  let mask = 0n;
+  for (let i = 0; i < explored.length; i++) if (explored[i]) mask |= 1n << BigInt(i);
+  return mask;
+}
+function markCoverage(explored, G, q, radius, L) {
+  const mask = coverageMaskAt(q, G, L, radius); let added = 0;
+  for (let i = 0; i < G * G; i++) if ((mask & (1n << BigInt(i))) !== 0n && !explored[i]) { explored[i] = 1; added++; }
+  return added;
+}
+function coverageLikelihood(M, obs, G) {
+  const vals = new Float64Array(G * G); let mn = Infinity;
+  for (let i = 0; i < vals.length; i++) { vals[i] = sse(M, cellCenter(i, G, M.L), obs); mn = Math.min(mn, vals[i]); }
+  let sum = 0;
+  for (let i = 0; i < vals.length; i++) { vals[i] = Math.exp(-(vals[i] - mn) / (2 * M.sigma * M.sigma)); sum += vals[i]; }
+  if (!(sum > 0)) { vals.fill(1 / vals.length); return vals; }
+  for (let i = 0; i < vals.length; i++) vals[i] /= sum;
+  return vals;
+}
+function planCoverageRoute(weights, explored, q0, opt) {
+  const G = opt.G, L = opt.L, stepMax = opt.stepMax, radius = opt.radius;
+  const horizon = Math.max(1, opt.horizon || 4), travelWeight = opt.travelWeight == null ? 0.012 : opt.travelWeight;
+  const coverageBonus = opt.coverageBonus == null ? 0.015 : opt.coverageBonus;
+  const n = G * G, centers = Array.from({ length: n }, (_, i) => cellCenter(i, G, L));
+  const cover = centers.map(p => coverageMaskAt(p, G, L, radius));
+  const neighbors = centers.map((p, i) => centers.map((r, j) => ({ j, d: Math.hypot(r[0] - p[0], r[1] - p[1]) })).filter(e => e.j !== i && e.d <= stepMax + 1e-7));
+  const baseMask = exploredMask(explored), memo = new Map(), massMemo = new Map();
+  const mass = mask => {
+    const key = mask.toString(36); if (massMemo.has(key)) return massMemo.get(key);
+    let v = 0; for (let i = 0; i < n; i++) if ((mask & (1n << BigInt(i))) !== 0n) v += weights[i] || 0;
+    massMemo.set(key, v); return v;
+  };
+  const freshValue = mask => {
+    let cells = 0; for (let i = 0; i < n; i++) if ((mask & (1n << BigInt(i))) !== 0n) cells++;
+    return mass(mask) + coverageBonus * cells;
+  };
+  const solve = (at, mask, depth) => {
+    if (depth <= 0) return { value: 0, route: [] };
+    const key = `${at}|${depth}|${mask.toString(36)}`;
+    if (memo.has(key)) return memo.get(key);
+    let best = { value: -Infinity, route: [] };
+    for (const edge of neighbors[at]) {
+      const fresh = cover[edge.j] & ~mask;
+      const tail = solve(edge.j, mask | cover[edge.j], depth - 1);
+      const value = freshValue(fresh) - travelWeight * edge.d / stepMax + tail.value;
+      if (value > best.value + 1e-12) best = { value, route: [edge.j].concat(tail.route) };
+    }
+    if (!best.route.length) best = { value: 0, route: [] };
+    memo.set(key, best); return best;
+  };
+  let best = { value: -Infinity, route: [], firstDistance: 0 };
+  for (let j = 0; j < n; j++) {
+    const d = Math.hypot(centers[j][0] - q0[0], centers[j][1] - q0[1]);
+    if (d > stepMax + 1e-7) continue;
+    const fresh = cover[j] & ~baseMask, tail = solve(j, baseMask | cover[j], horizon - 1);
+    const value = freshValue(fresh) - travelWeight * d / stepMax + tail.value;
+    if (value > best.value + 1e-12) best = { value, route: [j].concat(tail.route), firstDistance: d };
+  }
+  if (!best.route.length) {
+    let j = 0, d = Infinity;
+    centers.forEach((p, i) => { const di = Math.hypot(p[0] - q0[0], p[1] - q0[1]); if (di < d) { d = di; j = i; } });
+    best = { value: 0, route: [j], firstDistance: d };
+  }
+  return { next: centers[best.route[0]], route: best.route.map(i => centers[i]), value: best.value, memoStates: memo.size, exploredMask: baseMask };
+}
 function planNext(M, strategy, pHat, qs, obs, opt, R, formation) {
   const V = opt.stepMax, L = M.L;
   if (strategy === 'fisher') {
@@ -350,4 +431,4 @@ function planNext(M, strategy, pHat, qs, obs, opt, R, formation) {
   return repaired.feasible ? repaired.qs : qs.map(q => q.slice());
 }
 
-export { makeModel, meanRSSI, fisher, withPrior, det2, inv2, logdet, eig2, ellipse95, rmsBound, gradLogdet, cloudPts, objective, objectiveGrad, ringCloud, project, separationStatus, projectFormation, pgStep, optimizePlacement, theoreticalOptimum, sse, gridSearch, gaussNewton, gradientDescent, rng, measure, pastFisher, sigmaCloud, planNext, CHI2_95 };
+export { makeModel, meanRSSI, fisher, withPrior, det2, inv2, logdet, eig2, ellipse95, rmsBound, gradLogdet, cloudPts, objective, objectiveGrad, ringCloud, project, separationStatus, projectFormation, pgStep, optimizePlacement, theoreticalOptimum, sse, gridSearch, gaussNewton, gradientDescent, rng, measure, pastFisher, sigmaCloud, cellCenter, coverageMaskAt, exploredMask, markCoverage, coverageLikelihood, planCoverageRoute, planNext, CHI2_95 };
