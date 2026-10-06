@@ -214,16 +214,16 @@ function autoKick() { A.msTried = false; A.trans = null; if (!A.auto || A.dragDr
 // posições exibidas: interpolação suave entre a iteração anterior e a atual
 function shownQs(now) { if (!A.prevQs || A.prevQs.length !== A.qs.length) return A.qs; const a = Math.min(1, Math.max(0, (now - A.lastT) / STEP_MS)); const e = a * a * (3 - 2 * a); return A.qs.map((q, i) => [A.prevQs[i][0] + (q[0] - A.prevQs[i][0]) * e, A.prevQs[i][1] + (q[1] - A.prevQs[i][1]) * e]); }
 const modelA = () => C.makeModel({ sigma: A.sigma, h: A.h });
-const optsA = () => ({ dmin: A.dmin, rho: 0.01, maxMove: 30, scaling: A.scaling, cloud: C.ringCloud(A.rob), method: A.method, fixedStep: 10 ** A.tExp, cons: { L, battery: A.bat ? { c: BASE, r: A.R } : null } });
+const optsA = () => ({ dmin: A.dmin, maxMove: 30, scaling: A.scaling, cloud: C.ringCloud(A.rob), method: A.method, fixedStep: 10 ** A.tExp, cons: { L, battery: A.bat ? { c: BASE, r: A.R } : null } });
 const nsA = () => A.qs.map(() => A.m);
 function resetA() {
-  A.qs = OFFS.slice(0, A.N).map(o => [BASE[0] + o[0], BASE[1] + o[1]]);
+  A.qs = C.projectFormation(OFFS.slice(0, A.N).map(o => [BASE[0] + o[0], BASE[1] + o[1]]), optsA().cons, A.dmin).qs;
   A.trails = A.qs.map(q => [q.slice()]); A.it = 0; A.st = {}; A.still = 0; A.running = false; A.status = 'idle'; A.prevQs = null;
   A.hist = [];
   pushHistA(); requestA(); autoKick();
 }
 function pushHistA() { const M = modelA(); A.hist.push(C.objective(M, A.target, A.qs, nsA(), null, optsA()).J); if (A.hist.length > 2000) A.hist.shift(); }
-function paramsChangedA() { A.st = {}; A.still = 0; if (A.status === 'conv' || A.status === 'cap') A.status = 'idle'; A.qs = A.qs.map((q, i) => C.project(q, optsA().cons, i)); A.prevQs = null; requestA(); autoKick(); }
+function paramsChangedA() { A.st = {}; A.still = 0; if (A.status === 'conv' || A.status === 'cap') A.status = 'idle'; A.qs = C.projectFormation(A.qs, optsA().cons, A.dmin).qs; A.prevQs = null; requestA(); autoKick(); }
 function stepA() {
   const M = modelA(), o = optsA();
   const r = C.pgStep(M, A.target, A.qs, nsA(), null, o, A.st);
@@ -273,7 +273,8 @@ function frameA(now) {
   now = now || performance.now();
   if (A.trans && !A.dragDrone) {
     const t = Math.min(1, (now - A.trans.t0) / A.trans.dur), e = t * t * (3 - 2 * t);
-    A.qs = A.trans.from.map((f, i) => [f[0] + (A.trans.to[i][0] - f[0]) * e, f[1] + (A.trans.to[i][1] - f[1]) * e]);
+    const tween = A.trans.from.map((f, i) => [f[0] + (A.trans.to[i][0] - f[0]) * e, f[1] + (A.trans.to[i][1] - f[1]) * e]);
+    A.qs = C.projectFormation(tween, optsA().cons, A.dmin).qs;
     A.prevQs = null;
     A.qs.forEach((q, i) => { const tr = A.trails[i]; tr.push(q.slice()); if (tr.length > 600) tr.shift(); });
     if (t >= 1) { A.trans = null; pushHistA(); A.status = 'run'; A.still = 0; A.st = {}; A.lastT = now; }
@@ -348,9 +349,17 @@ function teleA() {
   const rows = A.qs.map((q, i) => {
     const g = ob.g[i];
     const dT = Math.hypot(q[0] - A.target[0], q[1] - A.target[1]);
+    let near = Infinity, nearDrone = -1;
+    A.qs.forEach((qj, j) => { if (j !== i) { const d = Math.hypot(q[0] - qj[0], q[1] - qj[1]); if (d < near) { near = d; nearDrone = j; } } });
+    const sepActive = A.dmin > 0 && near <= A.dmin + 0.5;
     let n = null, why = '';
     if (A.bat && Math.hypot(q[0] - BASE[0], q[1] - BASE[1]) >= A.R - 0.5) { const dx = q[0] - BASE[0], dy = q[1] - BASE[1], d = Math.hypot(dx, dy); n = [dx / d, dy / d]; why = 'bateria'; }
     else if (q[0] <= 0.5 || q[0] >= L - 0.5 || q[1] <= 0.5 || q[1] >= L - 0.5) { n = [q[0] <= 0.5 ? -1 : q[0] >= L - 0.5 ? 1 : 0, q[1] <= 0.5 ? -1 : q[1] >= L - 0.5 ? 1 : 0]; const d = Math.hypot(n[0], n[1]); n = [n[0] / d, n[1] / d]; why = 'borda do mapa'; }
+    if (sepActive) {
+      anyActive = true;
+      const labels = ['separação']; if (why) labels.push(why);
+      return `<tr><td class="num">${i + 1}</td><td><span class="pill act">${labels.join(' + ')}</span></td><td class="num">d(${i + 1}, ${nearDrone + 1}) = ${nf(near, 1)} m<br>restrição ativa</td></tr>`;
+    }
     if (n) {
       anyActive = true;
       const lam = g[0] * n[0] + g[1] * n[1], tg = Math.hypot(g[0] - lam * n[0], g[1] - lam * n[1]);
@@ -368,7 +377,6 @@ function teleA() {
       : eff > 0.999 ? 'Atingiu o ótimo analítico: drones a distância r = h da pessoa, em direções balanceadas.' + ms
       : anyActive ? 'Há restrições ativas: o ótimo restrito fica abaixo do ótimo sem restrições, como previsto por KKT.'
       : A.running ? 'Otimizando. O ótimo teórico tem N drones a r = h, em direções balanceadas.'
-      : (A.status === 'conv' && ob.pen.P > 1e-6) ? 'Ótimo local: dois drones ficaram na mesma direção e a separação mínima os mantém assim. Arraste um deles para o outro lado da pessoa e otimize de novo.'
       : A.status === 'conv' ? 'Convergiu para um ótimo local. O problema não é convexo, então o ponto de partida importa.' : 'O ótimo teórico tem N drones a r = h, em direções balanceadas.';
   } else {
     $('tEff').textContent = '–'; $('mEff').style.width = '0';
@@ -419,7 +427,7 @@ function bindA() {
     const p = toW(e);
     if (drag === null) { const r = cv.getBoundingClientRect(), tol = 16 / r.width * L; const near = A.qs.some(q => Math.hypot(q[0] - p[0], q[1] - p[1]) < tol) || Math.hypot(A.target[0] - p[0], A.target[1] - p[1]) < tol * 1.2; cv.style.cursor = near ? 'grab' : 'default'; return; }
     const c = [Math.min(L, Math.max(0, p[0])), Math.min(L, Math.max(0, p[1]))];
-    if (drag === 'T') { A.target = c; } else { A.qs[drag] = C.project(c, optsA().cons, drag); A.trails[drag] = [A.qs[drag].slice()]; A.prevQs = null; }
+    if (drag === 'T') { A.target = c; } else { A.qs[drag] = C.project(c, optsA().cons, drag); A.qs = C.projectFormation(A.qs, optsA().cons, A.dmin).qs; A.trails = A.qs.map(q => [q.slice()]); A.prevQs = null; }
     A.st = {}; A.still = 0; if (!A.running) A.status = 'idle';
     if (!A.running) pushHistA();
     if (drag === 'T') autoKick();
@@ -490,7 +498,8 @@ function frameB(now) {
   pendB = false;
   if (B.anim) {
     const a = B.anim, t = Math.min(1, (performance.now() - a.t0) / a.dur), e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    B.qs = a.from.map((f, i) => [f[0] + (a.to[i][0] - f[0]) * e, f[1] + (a.to[i][1] - f[1]) * e]);
+    const tween = a.from.map((f, i) => [f[0] + (a.to[i][0] - f[0]) * e, f[1] + (a.to[i][1] - f[1]) * e]);
+    B.qs = C.projectFormation(tween, { L }, B.dmin).qs;
     if (t >= 1) { B.qs = a.to.map(q => q.slice()); B.qs.forEach((q, i) => B.trails[i].push(q.slice())); B.anim = null; setPhase(null); if (B.auto) setTimeout(() => { if (B.auto) { if (B.round < B.maxR) doRound(true); else stopAuto(); } }, 350); }
   }
   drawB(); teleB();

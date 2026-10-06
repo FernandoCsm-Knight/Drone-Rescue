@@ -71,33 +71,16 @@ function gradLogdet(M, p, qs, ns, Ftot) {
   return g;
 }
 
-// Penalidade de separação mínima entre drones
-function sepPenalty(qs, dmin, rho) {
-  let P = 0; const g = qs.map(() => [0, 0]);
-  if (!dmin) return { P, g };
-  for (let i = 0; i < qs.length; i++) for (let j = i + 1; j < qs.length; j++) {
-    const dx = qs[i][0] - qs[j][0], dy = qs[i][1] - qs[j][1];
-    const d = Math.sqrt(dx * dx + dy * dy) || 1e-9;
-    const viol = dmin - d;
-    if (viol > 0) {
-      P += rho * viol * viol;
-      const f = -2 * rho * viol / d; // dP/dq_i = 2ρ viol · (−(q_i−q_j)/d)
-      g[i][0] += f * dx; g[i][1] += f * dy; g[j][0] -= f * dx; g[j][1] -= f * dy;
-    }
-  }
-  return { P, g };
-}
-
-// Objetivo J(q) = log det F(q) − penalidade, e seu gradiente
+// Objetivo J(q) = log det F(q), e seu gradiente.
+// A separação mínima é tratada como restrição dura pela projeção da formação.
 // opt.cloud (opcional): critério robusto/bayesiano — média de log det F sobre posições plausíveis p + d_k
 function cloudPts(p, opt) { return opt.cloud.map(c => ({ p: [p[0] + c.d[0], p[1] + c.d[1]], w: c.w, base: c.base })); }
 function objective(M, p, qs, ns, base, opt) {
   const F = withPrior(M, fisher(M, p, qs, ns, base));
   const ld = logdet(F);
-  const pen = sepPenalty(qs, opt.dmin, opt.rho || 0.01);
   let crit = ld;
   if (opt.cloud) { crit = 0; for (const c of cloudPts(p, opt)) crit += c.w * logdet(withPrior(M, fisher(M, c.p, qs, ns, c.base || base))); }
-  return { J: crit - pen.P, ld, crit, F, pen };
+  return { J: crit, ld, crit, F };
 }
 function objectiveGrad(M, p, qs, ns, base, opt) {
   const o = objective(M, p, qs, ns, base, opt);
@@ -109,7 +92,7 @@ function objectiveGrad(M, p, qs, ns, base, opt) {
       gradLogdet(M, c.p, qs, ns, Fk).forEach((v, i) => { gl[i][0] += c.w * v[0]; gl[i][1] += c.w * v[1]; });
     }
   } else gl = gradLogdet(M, p, qs, ns, o.F);
-  o.g = gl.map((v, i) => [v[0] - o.pen.g[i][0], v[1] - o.pen.g[i][1]]);
+  o.g = gl;
   return o;
 }
 // Nuvem de posições: centro + anel de 8 pontos a distância rho
@@ -133,13 +116,54 @@ function project(q, cons, i) {
   return [x, y];
 }
 
+// Projeção iterativa da formação no conjunto com separação mínima.
+// Para cada par violado, usa a projeção euclidiana do par no exterior da faixa
+// ||q_i-q_j|| < dmin e reprojeta cada ponto nas restrições espaciais.
+// A direção determinística resolve inclusive o caso q_i = q_j.
+function separationStatus(qs, dmin, tol) {
+  let minDistance = Infinity, maxViolation = 0;
+  if (!dmin || qs.length < 2) return { feasible: true, minDistance, maxViolation };
+  for (let i = 0; i < qs.length; i++) for (let j = i + 1; j < qs.length; j++) {
+    const d = Math.hypot(qs[i][0] - qs[j][0], qs[i][1] - qs[j][1]);
+    minDistance = Math.min(minDistance, d);
+    maxViolation = Math.max(maxViolation, dmin - d);
+  }
+  return { feasible: maxViolation <= (tol == null ? 1e-6 : tol), minDistance, maxViolation: Math.max(0, maxViolation) };
+}
+function projectFormation(qs, cons, dmin, maxPasses) {
+  const out = qs.map((q, i) => project(q, cons, i));
+  if (!dmin || out.length < 2) return { qs: out, ...separationStatus(out, dmin) };
+  const passes = maxPasses || 120;
+  for (let pass = 0; pass < passes; pass++) {
+    let worst = 0;
+    for (let i = 0; i < out.length; i++) for (let j = i + 1; j < out.length; j++) {
+      let dx = out[i][0] - out[j][0], dy = out[i][1] - out[j][1];
+      let d = Math.hypot(dx, dy);
+      const gap = dmin - d;
+      if (gap <= 1e-7) continue;
+      worst = Math.max(worst, gap);
+      if (d < 1e-10) {
+        const angle = ((i + 1) * 2.399963229728653 + (j + 1) * 1.618033988749895) % (2 * Math.PI);
+        dx = Math.cos(angle); dy = Math.sin(angle); d = 1;
+      }
+      const ux = dx / d, uy = dy / d, push = (gap + 1e-7) / 2;
+      out[i] = project([out[i][0] + ux * push, out[i][1] + uy * push], cons, i);
+      out[j] = project([out[j][0] - ux * push, out[j][1] - uy * push], cons, j);
+    }
+    if (worst <= 1e-7) break;
+  }
+  return { qs: out, ...separationStatus(out, dmin) };
+}
+
 // Um passo de gradiente projetado (subida) com busca de Armijo, ou passo fixo
 function pgStep(M, p, qs, ns, base, opt, state) {
   const cur = objectiveGrad(M, p, qs, ns, base, opt);
   const cons = opt.cons;
   if (opt.method === 'fixed') {
     const t = opt.fixedStep;
-    const nq = qs.map((q, i) => project([q[0] + t * cur.g[i][0], q[1] + t * cur.g[i][1]], cons, i));
+    const cand = qs.map((q, i) => project([q[0] + t * cur.g[i][0], q[1] + t * cur.g[i][1]], cons, i));
+    const repaired = projectFormation(cand, cons, opt.dmin);
+    const nq = repaired.feasible ? repaired.qs : qs.map(q => q.slice());
     return { qs: nq, cur, t, tries: 1 };
   }
   let t = state.t || 1e4, tries = 0;
@@ -162,7 +186,10 @@ function pgStep(M, p, qs, ns, base, opt, state) {
   const stepOf = (i, t) => [t * dir[i][0], t * dir[i][1]];
   while (tries < 60) {
     tries++;
-    const nq = qs.map((q, i) => { const d = stepOf(i, t); return project([q[0] + d[0], q[1] + d[1]], cons, i); });
+    const cand = qs.map((q, i) => { const d = stepOf(i, t); return project([q[0] + d[0], q[1] + d[1]], cons, i); });
+    const repaired = projectFormation(cand, cons, opt.dmin);
+    if (!repaired.feasible) { t /= 2; continue; }
+    const nq = repaired.qs;
     let dec = 0;
     for (let i = 0; i < qs.length; i++) dec += cur.g[i][0] * (nq[i][0] - qs[i][0]) + cur.g[i][1] * (nq[i][1] - qs[i][1]);
     const nj = objective(M, p, nq, ns, base, opt).J;
@@ -175,7 +202,7 @@ function pgStep(M, p, qs, ns, base, opt, state) {
 
 // Otimização completa (para missão e Monte Carlo)
 function optimizePlacement(M, p, qs0, ns, base, opt, iters) {
-  let qs = qs0.map(q => q.slice());
+  let qs = projectFormation(qs0, opt.cons, opt.dmin).qs;
   const st = {};
   for (let k = 0; k < (iters || 60); k++) {
     const r = pgStep(M, p, qs, ns, base, opt, st);
@@ -303,18 +330,24 @@ function planNext(M, strategy, pHat, qs, obs, opt, R, formation) {
   if (strategy === 'fisher') {
     const base = pastFisher(M, pHat, obs);
     const ns = qs.map(() => opt.m);
-    const o = { dmin: opt.dmin, rho: 0.01, cons: { L, stepFrom: qs, stepMax: V } };
+    const o = { dmin: opt.dmin, cons: { L, stepFrom: qs, stepMax: V } };
     if (opt.robust) o.cloud = sigmaCloud(M, pHat, obs, opt.robustCap || 250);
     return optimizePlacement(M, pHat, qs, ns, base, o, opt.iters || 50);
   }
   if (strategy === 'goto') {
-    return qs.map((q, i) => {
+    const cons = { L, stepFrom: qs, stepMax: V };
+    const cand = qs.map((q, i) => {
       const tgt = [pHat[0] + formation[i][0], pHat[1] + formation[i][1]];
-      return project(tgt, { L, stepFrom: qs, stepMax: V }, i);
+      return project(tgt, cons, i);
     });
+    const repaired = projectFormation(cand, cons, opt.dmin);
+    return repaired.feasible ? repaired.qs : qs.map(q => q.slice());
   }
   // aleatória
-  return qs.map((q, i) => { const th = 2 * Math.PI * R.u(); return project([q[0] + V * Math.cos(th), q[1] + V * Math.sin(th)], { L, stepFrom: qs, stepMax: V }, i); });
+  const cons = { L, stepFrom: qs, stepMax: V };
+  const cand = qs.map((q, i) => { const th = 2 * Math.PI * R.u(); return project([q[0] + V * Math.cos(th), q[1] + V * Math.sin(th)], cons, i); });
+  const repaired = projectFormation(cand, cons, opt.dmin);
+  return repaired.feasible ? repaired.qs : qs.map(q => q.slice());
 }
 
-export { makeModel, meanRSSI, fisher, withPrior, det2, inv2, logdet, eig2, ellipse95, rmsBound, gradLogdet, sepPenalty, cloudPts, objective, objectiveGrad, ringCloud, project, pgStep, optimizePlacement, theoreticalOptimum, sse, gridSearch, gaussNewton, gradientDescent, rng, measure, pastFisher, sigmaCloud, planNext, CHI2_95 };
+export { makeModel, meanRSSI, fisher, withPrior, det2, inv2, logdet, eig2, ellipse95, rmsBound, gradLogdet, cloudPts, objective, objectiveGrad, ringCloud, project, separationStatus, projectFormation, pgStep, optimizePlacement, theoreticalOptimum, sse, gridSearch, gaussNewton, gradientDescent, rng, measure, pastFisher, sigmaCloud, planNext, CHI2_95 };

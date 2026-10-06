@@ -236,8 +236,8 @@
         <p>Cada drone informa apenas na direção da reta drone–pessoa, porque \(F_i\) tem posto 1. Um drone sozinho mede distância, e é preciso olhar de direções diferentes para triangular.</p>
 
         <h2>O problema de otimização</h2>
-        <div class="eq">\[ \max_{q_1,\dots,q_N}\; \log\det F(q) \;-\; \rho\!\!\sum_{i\lt j}\max\!\left(0,\, d_{\min}-\lVert q_i-q_j\rVert\right)^2 \quad\text{s.a.}\quad q_i\in[0,L]^2,\;\; \lVert q_i-b\rVert\le R . \]</div>
-        <p>Maximizar o determinante (critério D-ótimo) equivale a minimizar a área da elipse de confiança. A separação mínima entra como penalidade quadrática. A caixa e o alcance da bateria entram como restrições tratadas por projeção.</p>
+        <div class="eq">\[ \max_{q_1,\dots,q_N}\; \log\det F(q) \quad\text{s.a.}\quad q_i\in[0,L]^2,\;\; \lVert q_i-b\rVert\le R,\;\; \lVert q_i-q_j\rVert\ge d_{\min}\quad(i\ne j). \]</div>
+        <p>Maximizar o determinante (critério D-ótimo) equivale a minimizar a área da elipse de confiança. A caixa, o alcance da bateria e a separação mínima são restrições do conjunto viável. Depois de cada passo, uma projeção por pares afasta qualquer dupla que esteja a menos de (d_{\min}), inclusive quando dois drones começam exatamente sobrepostos, e reprojeta os pontos na caixa e no alcance permitido.</p>
         <p>O gradiente, obtido de \(\mathrm d \log\det F = \mathrm{tr}(F^{-1}\mathrm dF)\), com \(A = F^{-1}\) e \(D = \lVert v\rVert^2+h^2\), é</p>
         <div class="eq">\[ \nabla_{q_i} \log\det F = -k\,n_i\left( \frac{2Av}{D^2} - \frac{4\,(v^\top A v)\,v}{D^3} \right). \]</div>
         <p>No app ele foi conferido contra diferenças finitas, com concordância em todos os dígitos exibidos.</p>
@@ -263,9 +263,9 @@
         <p>A função objetivo está correta: o gradiente confere com diferenças finitas, com erro relativo de \(5\times10^{-9}\). O problema é de escala, a fraqueza clássica do método do gradiente quando as variáveis têm sensibilidades muito diferentes. A correção padrão é o pré-condicionamento por blocos: cada drone recebe seu próprio limite de 30 m por iteração, como uma velocidade máxima. A direção continua sendo de subida, já que \(\sum_i \nabla_{q_i}J\cdot\Delta q_i > 0\). Com isso, todos chegam por volta da iteração 28. Perto do ótimo nenhum limite está ativo e o método volta a ser o gradiente comum. A opção "Passo comum" do app mostra o comportamento antigo, para comparar.</p>
 
         <h2>Restrições e KKT</h2>
-        <p>Cada passo é uma subida pelo gradiente projetada no conjunto viável, \(q^{k+1} = P_\Omega\!\left(q^k + t_k\nabla J\right)\), com \(t_k\) escolhido pela regra de Armijo e deslocamento limitado a 30 m por iteração, para a animação ficar legível. Com bateria limitada, o ótimo cumpre KKT: para o drone na fronteira \(\lVert q_i - b\rVert = R\),</p>
+        <p>Cada passo é uma subida pelo gradiente projetada no conjunto viável, \(q^{k+1} = P_\Omega\!\left(q^k + t_k\nabla J\right)\), onde \(\Omega\) inclui também \(\lVert q_i-q_j\rVert\ge d_{\min}\). A projeção nessa parte não convexa é calculada iterativamente por pares. O passo \(t_k\) é escolhido pela regra de Armijo e o deslocamento é limitado a 30 m por iteração, para a animação ficar legível. Com bateria limitada, o ótimo cumpre KKT: para o drone na fronteira \(\lVert q_i - b\rVert = R\),</p>
         <div class="eq">\[ \nabla_{q_i} J = \lambda_i\, \frac{q_i-b}{\lVert q_i-b\rVert}, \qquad \lambda_i \ge 0, \]</div>
-        <p>e para o drone livre \(\nabla_{q_i}J = 0\). A tabela de KKT do app mostra \(\lambda_i\) e o resíduo tangencial.</p>
+        <p>e para o drone livre \(\nabla_{q_i}J = 0\). Quando a separação está ativa, aparecem também multiplicadores \(\mu_{ij}\ge0\) associados a \(\lVert q_i-q_j\rVert-d_{\min}\ge0\). A tabela do app mostra a condição da bateria ou da borda; pares na separação mínima são identificados como restrições ativas.</p>
 
         <h2>Estimação: Gauss-Newton é Fisher scoring</h2>
         <p>Na missão a posição é desconhecida. Ela é estimada maximizando a verossimilhança, o que equivale a minimizar \(S(p)=\sum_j (y_j-\mu_j(p))^2\). O passo de Fisher scoring troca a Hessiana pela informação de Fisher:</p>

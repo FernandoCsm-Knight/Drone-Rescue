@@ -41,5 +41,16 @@ for (const N of [2, 4, 6]) {
   ok(Math.hypot(p[0] - alvo[0], p[1] - alvo[1]) < 1e-3, `Gauss-Newton recupera a posição sem ruído: (${p[0].toFixed(3)}, ${p[1].toFixed(3)})`);
 }
 
+// 4. Separação mínima é uma restrição dura, inclusive para drones sobrepostos
+{
+  const dmin = 100, cons = { L: 1000 };
+  const r = C.projectFormation([[300, 300], [300, 300], [320, 300]], cons, dmin);
+  ok(r.feasible && r.minDistance >= dmin - 1e-6,
+    `projeção respeita separação mínima: menor distância ${r.minDistance.toFixed(6)} m`);
+  const qs = C.optimizePlacement(M, [500, 500], [[300, 300], [300, 300]], [10, 10], null, { dmin, cons }, 200);
+  const s = C.separationStatus(qs, dmin);
+  ok(s.feasible, `otimização mantém separação dura após sobreposição inicial: ${s.minDistance.toFixed(6)} m`);
+}
+
 if (falhas) { console.error(`${falhas} verificação(ões) falharam`); process.exit(1); }
 console.log('Todas as verificações passaram.');

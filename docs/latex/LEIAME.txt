@@ -1,0 +1,14 @@
+Guia: Drones de resgate e a informação de Fisher
+
+Arquivos
+  guia.tex   texto do guia
+  fig/       figuras (PDF vetorial e capturas do app em PNG)
+  figs.py    script que gera as figuras (Python + matplotlib), caso queira alterá-las
+  mc.json    resultados das simulações usados nos gráficos e tabelas
+
+Como compilar
+  Overleaf: envie a pasta inteira (ou o zip), abra Menu > Compiler e escolha XeLaTeX.
+  Local:    xelatex guia.tex   (rode duas vezes para atualizar sumário e referências)
+
+O arquivo também tem um caminho alternativo para pdfLaTeX (babel + lmodern),
+mas a versão testada foi a XeLaTeX.
