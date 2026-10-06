@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Drones de busca e resgate que se posicionam maximizando a informação de Fisher.">
+    <meta name="theme-color" content="#ECEFE6">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <title>Drones de resgate</title>
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem('drone-rescue-theme');
+          const palette = localStorage.getItem('drone-rescue-palette');
+          document.documentElement.dataset.theme = ['system', 'light', 'dark'].includes(theme) ? theme : 'system';
+          document.documentElement.dataset.palette = ['rescue', 'ocean', 'forest'].includes(palette) ? palette : 'rescue';
+        } catch (_) {
+          document.documentElement.dataset.theme = 'system';
+          document.documentElement.dataset.palette = 'rescue';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+<div class="wrap">
+  <header class="top">
+    <div class="topline">
+      <h1>Drones de resgate</h1>
+      <div class="appearance" aria-label="Aparência do site">
+        <fieldset class="theme-choice">
+          <legend>Tema</legend>
+          <div class="segmented">
+            <button type="button" data-theme-choice="system" aria-pressed="true">Sistema</button>
+            <button type="button" data-theme-choice="light" aria-pressed="false">Claro</button>
+            <button type="button" data-theme-choice="dark" aria-pressed="false">Escuro</button>
+          </div>
+        </fieldset>
+        <fieldset class="palette-choice">
+          <legend>Paleta</legend>
+          <div class="palette-options">
+            <button type="button" data-palette-choice="rescue" aria-pressed="true"><i class="palette-dot rescue"></i>Resgate</button>
+            <button type="button" data-palette-choice="ocean" aria-pressed="false"><i class="palette-dot ocean"></i>Oceano</button>
+            <button type="button" data-palette-choice="forest" aria-pressed="false"><i class="palette-dot forest"></i>Floresta</button>
+          </div>
+        </fieldset>
+      </div>
+    </div>
+    <p class="lede">Uma pessoa está perdida e seu celular emite sinal. Cada drone mede a intensidade desse sinal com ruído. A matriz de Fisher diz quanta informação cada posição de drone fornece sobre a localização da pessoa, e a otimização escolhe as posições que tornam a incerteza a menor possível.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-pos" aria-selected="true" data-tab="posicionamento">Posicionamento ótimo</button>
+    <button role="tab" id="tab-mis" aria-selected="false" data-tab="missao">Missão de busca</button>
+    <button role="tab" id="tab-cmp" aria-selected="false" data-tab="comparacao">Comparação</button>
+    <button role="tab" id="tab-teo" aria-selected="false" data-tab="teoria">Teoria</button>
+  </nav>
+
+  <!-- ===================== ABA 1 ===================== -->
+  <section id="posicionamento">
+    <div class="stage">
+      <div class="mapcol">
+        <div class="mapbox" id="boxA"><canvas id="mapA" aria-label="Mapa: arraste a pessoa e os drones"></canvas><div class="maphint">Arraste a pessoa ou os drones</div></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--accent)"></i>Pessoa (posição conhecida nesta aba)</span>
+          <span><i class="sw" style="background:var(--signal)"></i>Drone</span>
+          <span><i class="sw line" style="border-color:var(--muted);border-top-style:dotted"></i>Anel r = h</span>
+          <span><i class="sw line" style="border-color:var(--warn);border-top-style:dashed"></i>Alcance da bateria</span>
+          <span><i class="sw" style="background:var(--accent);opacity:.55;width:6px;height:6px"></i>Posições plausíveis (critério robusto)</span>
+        </div>
+        <div class="chartbox"><h4 id="chartATitle">Convergência: log det F por iteração</h4><div class="cv"><canvas id="chartA"></canvas></div></div>
+        <div class="block" style="max-width:720px">
+          <h3>Condições de KKT</h3>
+          <div class="tablewrap"><table class="kkt"><thead><tr><th>Drone</th><th>Situação</th><th>Verificação</th></tr></thead><tbody id="kktBody"></tbody></table></div>
+          <p class="note">No ótimo, drone livre tem gradiente nulo. Drone preso no limite da bateria tem gradiente só na direção normal, apontando para fora, com multiplicador λ ≥ 0.</p>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="block">
+          <h3>Cenário</h3>
+          <div class="row" id="presets">
+            <button class="chip" data-preset="livre" aria-pressed="true">Livre</button>
+            <button class="chip" data-preset="bateria" aria-pressed="false">Bateria limitada</button>
+            <button class="chip" data-preset="dois" aria-pressed="false">Dois drones</button>
+            <button class="chip" data-preset="seis" aria-pressed="false">Seis drones</button>
+          </div>
+          <label class="ctrl">Drones<output id="oN">4</output><input type="range" id="iN" min="1" max="8" step="1" value="4"></label>
+          <label class="ctrl">Altitude de voo h<output id="oH">100 m</output><input type="range" id="iH" min="30" max="250" step="5" value="100"></label>
+          <label class="ctrl">Ruído do sinal σ<output id="oS">4 dB</output><input type="range" id="iS" min="1" max="10" step="0.5" value="4"></label>
+          <label class="ctrl">Medições por drone<output id="oM">10</output><input type="range" id="iM" min="1" max="50" step="1" value="10"></label>
+          <label class="ctrl">Incerteza sobre a posição da pessoa<output id="oRob">30 m</output><input type="range" id="iRob" min="0" max="80" step="5" value="30"></label>
+          <label class="ctrl">Separação mínima entre drones<output id="oD">40 m</output><input type="range" id="iD" min="0" max="150" step="5" value="40"></label>
+          <label class="chk"><input type="checkbox" id="iBat"> Limitar alcance da bateria</label>
+          <label class="ctrl" id="batCtrl">Raio a partir da base<output id="oR">560 m</output><input type="range" id="iR" min="200" max="1300" step="10" value="560"></label>
+        </div>
+        <div class="block">
+          <h3>Otimizador</h3>
+          <select id="iMeth" aria-label="Método">
+            <option value="armijo">Gradiente projetado + busca de Armijo</option>
+            <option value="fixed">Gradiente projetado com passo fixo</option>
+          </select>
+          <label class="ctrl" style="grid-template-columns:1fr">Limite de 30 m por iteração
+            <select id="iScale">
+              <option value="perDrone">Por drone: cada um voa até 30 m</option>
+              <option value="global">Passo comum: gradiente puro</option>
+            </select></label>
+          <label class="ctrl" id="stepCtrl">Passo fixo t<output id="oT">2×10⁴</output><input type="range" id="iT" min="2" max="6" step="0.1" value="4.3"></label>
+          <div class="row">
+            <button class="btn primary" id="bRun">Otimizar</button>
+            <button class="btn" id="bStep">Um passo</button>
+            <button class="btn" id="bReset">Voltar à base</button>
+            <span class="pill idle" id="stA">parado</span>
+          </div>
+          <label class="chk"><input type="checkbox" id="iAuto" checked> Otimizar automaticamente</label>
+          <p class="note" style="margin-top:-4px">Ligado: a otimização recomeça sozinha sempre que você move a pessoa, um drone ou um parâmetro. Desligue para usar Otimizar e Um passo.</p>
+          <label class="chk"><input type="checkbox" id="iGain"> Mostrar onde um drone extra mais ajudaria</label>
+        </div>
+        <div class="block">
+          <h3>Telemetria</h3>
+          <dl class="tele">
+            <div><dt>log det F</dt><dd id="tLd">–</dd></div>
+            <div><dt>Iteração</dt><dd id="tIt">0</dd></div>
+            <div><dt>Erro mínimo (RMS)</dt><dd id="tRms">–</dd></div>
+            <div><dt>Área da elipse 95%</dt><dd id="tArea">–</dd></div>
+          </dl>
+          <div style="display:grid;gap:4px"><div class="row" style="justify-content:space-between;font-size:12.5px"><span>Eficiência D frente ao ótimo teórico</span><b id="tEff" style="font-family:var(--f-mono)">–</b></div><div class="meter"><i id="mEff"></i></div></div>
+          <p class="note" id="tEffNote"></p>
+        </div>
+        <div class="block">
+          <h3>Elipse de incerteza</h3>
+          <div class="inset"><canvas id="insetA"></canvas></div>
+          <p class="note">Região onde a pessoa está com 95% de confiança, segundo o limite de Cramér-Rao (F<sup>−1</sup>). Ampliada em torno da pessoa.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 2 ===================== -->
+  <section id="missao" hidden>
+    <div class="stage">
+      <div class="mapcol">
+        <div class="mapbox" id="boxB"><canvas id="mapB" aria-label="Mapa da missão"></canvas><div class="maphint" id="hintB">Posição da pessoa desconhecida</div></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--signal)"></i>Drone e trajeto</span>
+          <span><i class="sw" style="background:rgba(var(--heat-like),.55)"></i>Verossimilhança</span>
+          <span><i class="sw line" style="border-color:var(--accent)"></i>Estimativa e elipse 95%</span>
+          <span><i class="sw" style="background:var(--accent);outline:2px solid var(--surface)"></i>Pessoa (ao revelar)</span>
+        </div>
+        <div class="chartbox"><h4>Precisão por rodada (metros, escala log)</h4><div class="cv"><canvas id="chartB"></canvas></div></div>
+      </div>
+      <aside class="panel">
+        <div class="block">
+          <h3>Missão</h3>
+          <div class="cycle" id="cycle"><span data-ph="medir">Medir</span><span data-ph="estimar">Estimar</span><span data-ph="planejar">Planejar</span><span data-ph="voar">Voar</span></div>
+          <label class="ctrl" style="grid-template-columns:1fr">Estratégia de voo
+            <select id="iStrat">
+              <option value="fisher">Maximizar a informação de Fisher</option>
+              <option value="goto">Voar direto até a estimativa</option>
+              <option value="random">Voo aleatório</option>
+            </select></label>
+          <label class="ctrl">Drones<output id="oN2">4</output><input type="range" id="iN2" min="2" max="8" step="1" value="4"></label>
+          <label class="ctrl">Ruído do sinal σ<output id="oS2">4 dB</output><input type="range" id="iS2" min="1" max="10" step="0.5" value="4"></label>
+          <div class="row">
+            <button class="btn primary" id="bNext">Próxima rodada</button>
+            <button class="btn" id="bAuto">Automático</button>
+            <button class="btn" id="bNew">Nova missão</button>
+          </div>
+          <div class="row">
+            <label class="chk"><input type="checkbox" id="iReveal"> Revelar a pessoa</label>
+            <label class="chk"><input type="checkbox" id="iLike" checked> Verossimilhança</label>
+          </div>
+          <p class="note">A cada rodada cada drone faz 5 medições, a pessoa é estimada por máxima verossimilhança e os drones voam no máximo 150 m.</p>
+        </div>
+        <div class="block">
+          <h3>Telemetria</h3>
+          <dl class="tele">
+            <div><dt>Rodada</dt><dd id="uR">0</dd></div>
+            <div><dt>Medições</dt><dd id="uM">0</dd></div>
+            <div><dt>Incerteza (RMS)</dt><dd id="uRms">–</dd></div>
+            <div><dt>Erro real</dt><dd id="uErr">oculto</dd></div>
+          </dl>
+        </div>
+        <div class="block">
+          <h3>Estimador</h3>
+          <div class="inset"><canvas id="insetB"></canvas></div>
+          <p class="note" id="estNote">Gauss-Newton (= Fisher scoring) contra descida pelo gradiente, partindo do mesmo ponto.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 3 ===================== -->
+  <section id="comparacao" hidden>
+    <div class="stage">
+      <div class="mapcol">
+        <div class="chartbox" style="max-width:none"><h4 id="titleC">Erro mediano de localização por rodada (metros, escala log)</h4><div class="cv" style="height:340px"><canvas id="chartC"></canvas></div>
+          <div class="legend" id="legC"></div></div>
+        <div class="block"><h3>Resultados</h3><div class="tablewrap"><table class="res" id="resTable"><thead id="resHead"><tr><th>Estratégia</th><th>Rodada 3</th><th>Rodada 6</th><th>Rodada 12</th><th>Mediana &lt; 25 m na rodada</th><th>Missões &lt; 25 m na rodada 6</th></tr></thead><tbody></tbody></table></div></div>
+      </div>
+      <aside class="panel">
+        <div class="block">
+          <h3>Simulação de Monte Carlo</h3>
+          <label class="ctrl" style="grid-template-columns:1fr">Comparar
+            <select id="iModeC">
+              <option value="strat">Estratégias de voo</option>
+              <option value="qty">Quantidade de drones lançados</option>
+            </select></label>
+          <label class="ctrl" id="cStrat">Drones lançados<output id="oNC">4</output><input type="range" id="iNC" min="2" max="8" step="1" value="4"></label>
+          <div id="cQty" hidden style="display:grid;gap:6px"><span style="font-size:13.5px">Quantidades a comparar</span>
+            <div class="row" id="qtyChips"><button class="chip" data-n="2">2</button><button class="chip" data-n="3">3</button><button class="chip" data-n="4">4</button><button class="chip" data-n="6">6</button><button class="chip" data-n="8">8</button></div></div>
+          <p class="note" id="noteSim"></p>
+          <label class="ctrl">Missões por grupo<output id="oSim">40</output><input type="range" id="iSim" min="10" max="150" step="10" value="40"></label>
+          <div class="row"><button class="btn primary" id="bSim">Rodar simulações</button><span class="pill idle" id="stC">aguardando</span></div>
+          <div class="progress"><i id="pC"></i></div>
+        </div>
+        <div class="block">
+          <h3>Como ler</h3>
+          <div id="howC" style="display:grid;gap:8px"></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 4 ===================== -->
+  <section id="teoria" hidden>
+    <div class="theory">
+      <article>
+        <h2>Modelo de medição</h2>
+        <p>Um drone na posição horizontal \(q\), voando à altitude \(h\), mede a potência do sinal de um celular na posição \(p\). O modelo de perda de percurso log-distância é</p>
+        <div class="eq">\[ y = P_0 - 10\,\eta \log_{10} d(p,q) + \varepsilon, \qquad d^2 = \lVert p-q\rVert^2 + h^2, \qquad \varepsilon \sim \mathcal N(0,\sigma^2). \]</div>
+        <p>Valores usados: \(P_0=-40\) dBm, expoente \(\eta = 2{,}5\), \(\sigma\) entre 1 e 10 dB, área de 1 km × 1 km.</p>
+
+        <h2>Matriz de Fisher e limite de Cramér-Rao</h2>
+        <p>Com ruído gaussiano, a informação de Fisher de uma medição é \(F = \frac{1}{\sigma^2}\nabla_p\mu\,\nabla_p\mu^\top\). Derivando o modelo, com \(v = p-q\):</p>
+        <div class="eq">\[ F_i(q_i) = k\,\frac{v\,v^\top}{\left(\lVert v\rVert^2+h^2\right)^2}, \qquad k = \left(\frac{10\,\eta}{\sigma \ln 10}\right)^2 . \]</div>
+        <p>Medições independentes somam informação: \(F = \sum_i n_i F_i + \sigma_0^{-2} I\). O termo \(\sigma_0^{-2} I\), com \(\sigma_0 = 1\) km, é uma informação a priori fraca que evita matriz singular. O limite de Cramér-Rao diz que nenhum estimador não viesado tem covariância menor que \(F^{-1}\). A elipse de 95% é \(\{x : x^\top F x \le 5{,}991\}\).</p>
+        <p>Cada drone informa apenas na direção da reta drone–pessoa, porque \(F_i\) tem posto 1. Um drone sozinho mede distância, e é preciso olhar de direções diferentes para triangular.</p>
+
+        <h2>O problema de otimização</h2>
+        <div class="eq">\[ \max_{q_1,\dots,q_N}\; \log\det F(q) \;-\; \rho\!\!\sum_{i\lt j}\max\!\left(0,\, d_{\min}-\lVert q_i-q_j\rVert\right)^2 \quad\text{s.a.}\quad q_i\in[0,L]^2,\;\; \lVert q_i-b\rVert\le R . \]</div>
+        <p>Maximizar o determinante (critério D-ótimo) equivale a minimizar a área da elipse de confiança. A separação mínima entra como penalidade quadrática. A caixa e o alcance da bateria entram como restrições tratadas por projeção.</p>
+        <p>O gradiente, obtido de \(\mathrm d \log\det F = \mathrm{tr}(F^{-1}\mathrm dF)\), com \(A = F^{-1}\) e \(D = \lVert v\rVert^2+h^2\), é</p>
+        <div class="eq">\[ \nabla_{q_i} \log\det F = -k\,n_i\left( \frac{2Av}{D^2} - \frac{4\,(v^\top A v)\,v}{D^3} \right). \]</div>
+        <p>No app ele foi conferido contra diferenças finitas, com concordância em todos os dígitos exibidos.</p>
+
+        <h2>Solução analítica para conferência</h2>
+        <p>A informação de um drone a distância horizontal \(r\) é proporcional a \(r^2/(r^2+h^2)^2\). Derivando em \(r^2\), o máximo ocorre em \(r = h\). Logo, sem restrições:</p>
+        <ul>
+          <li>a distância ótima é \(r = h\). Um drone exatamente em cima da pessoa não informa nada na horizontal;</li>
+          <li>as direções devem ser balanceadas, isto é, \(\sum_i e^{2i\theta_i} = 0\). Isso dá \(\sum u_iu_i^\top = \tfrac N2 I\);</li>
+          <li>o valor ótimo é \(\log\det F^\star = 2\log\!\left(\dfrac{n\,k\,N}{8h^2} + \sigma_0^{-2}\right)\).</li>
+        </ul>
+        <p>O otimizador numérico atinge esse valor quando os drones partem de direções diferentes. Partindo todos da base, dois drones às vezes ficam na mesma direção, presos pela separação mínima. É um ótimo local, porque o problema não é convexo. A solução não é única: quatro drones a 45° um do outro num semicírculo também satisfazem \(\sum e^{2i\theta_i}=0\). O ângulo é dobrado porque \(uu^\top\) não distingue \(u\) de \(-u\).</p>
+
+        <h2>Empates, critério robusto e multistart</h2>
+        <p>Com a posição exata conhecida, o ótimo tem uma família inteira de soluções empatadas. Quatro drones em cruz e quatro drones num semicírculo, a 45° um do outro, dão exatamente a mesma matriz \(F\). Mas o semicírculo é frágil: se a pessoa estiver alguns metros fora do lugar suposto, ele perde mais informação que a cruz.</p>
+        <p>Por isso o app usa, por padrão, um critério robusto (projeto bayesiano). Ele maximiza a média de \(\log\det F\) sobre uma nuvem de posições plausíveis \(p + d_k\): o centro, com peso 1/3, e 8 pontos num anel de raio \(\rho\), dividindo os 2/3 restantes.</p>
+        <div class="eq">\[ \max_q \; \sum_k w_k \log\det F(q;\, p+d_k). \]</div>
+        <p>O empate desaparece e o arranjo simétrico passa a ser o melhor. O critério continua não convexo, porém. Os drones chegam todos pelo lado da base, e o gradiente sozinho para num ótimo local, com os drones agrupados desse lado. Para escapar, quando o gradiente converge o app roda um multistart: 16 otimizações a partir de arranjos iniciais diferentes. Se alguma achar um valor melhor, os drones voam até essa solução, e o gradiente refina o resultado. Cada drone vai para a posição mais próxima, escolhida testando todas as atribuições possíveis.</p>
+        <p>Na missão, a nuvem vem da própria incerteza estimada: os pontos-sigma da elipse de covariância \(F^{-1}\), limitados a 250 m.</p>
+
+        <h2>Escala do passo: por que alguns drones demoravam</h2>
+        <p>No gradiente puro, todos os drones andam com o mesmo passo \(t\): \(\Delta q_i = t\,\nabla_{q_i} J\). Mas o gradiente de um drone distante é muito menor, porque a informação cai com \(1/r^2\) e sua derivada com \(1/r^3\). Na simulação, os dois drones mais distantes tinham gradiente de 4 a 10 vezes menor. Com o passo limitado pelo drone mais rápido, eles chegavam perto da pessoa só por volta da iteração 130, contra 27 dos outros.</p>
+        <p>A função objetivo está correta: o gradiente confere com diferenças finitas, com erro relativo de \(5\times10^{-9}\). O problema é de escala, a fraqueza clássica do método do gradiente quando as variáveis têm sensibilidades muito diferentes. A correção padrão é o pré-condicionamento por blocos: cada drone recebe seu próprio limite de 30 m por iteração, como uma velocidade máxima. A direção continua sendo de subida, já que \(\sum_i \nabla_{q_i}J\cdot\Delta q_i > 0\). Com isso, todos chegam por volta da iteração 28. Perto do ótimo nenhum limite está ativo e o método volta a ser o gradiente comum. A opção "Passo comum" do app mostra o comportamento antigo, para comparar.</p>
+
+        <h2>Restrições e KKT</h2>
+        <p>Cada passo é uma subida pelo gradiente projetada no conjunto viável, \(q^{k+1} = P_\Omega\!\left(q^k + t_k\nabla J\right)\), com \(t_k\) escolhido pela regra de Armijo e deslocamento limitado a 30 m por iteração, para a animação ficar legível. Com bateria limitada, o ótimo cumpre KKT: para o drone na fronteira \(\lVert q_i - b\rVert = R\),</p>
+        <div class="eq">\[ \nabla_{q_i} J = \lambda_i\, \frac{q_i-b}{\lVert q_i-b\rVert}, \qquad \lambda_i \ge 0, \]</div>
+        <p>e para o drone livre \(\nabla_{q_i}J = 0\). A tabela de KKT do app mostra \(\lambda_i\) e o resíduo tangencial.</p>
+
+        <h2>Estimação: Gauss-Newton é Fisher scoring</h2>
+        <p>Na missão a posição é desconhecida. Ela é estimada maximizando a verossimilhança, o que equivale a minimizar \(S(p)=\sum_j (y_j-\mu_j(p))^2\). O passo de Fisher scoring troca a Hessiana pela informação de Fisher:</p>
+        <div class="eq">\[ p^{k+1} = p^k + F(p^k)^{-1}\,\nabla_p \ell(p^k) = p^k + (J^\top J)^{-1}J^\top r . \]</div>
+        <p>Com ruído gaussiano isso é exatamente o método de Gauss-Newton. A verossimilhança não é convexa: com drones alinhados ela forma um anel ou uma meia-lua. Por isso o app faz primeiro uma busca em grade de 60 × 60 e só depois refina com Gauss-Newton.</p>
+        <p>O planejamento usa a Fisher calculada na estimativa atual \(\hat p\), somando a informação já coletada:</p>
+        <div class="eq">\[ \max_{q}\; \log\det\Big( F_{\text{passado}}(\hat p) + n \textstyle\sum_i F_i(q_i;\hat p) \Big) \quad \text{s.a.} \quad \lVert q_i - q_i^{\text{atual}}\rVert \le 150\ \text{m}. \]</div>
+
+        <h2>Limitações</h2>
+        <div class="callout">
+          <p>O sinal real de celular sofre sombreamento por relevo e vegetação, multipercurso e variação de antena, e é bem mais ruidoso que o modelo.</p>
+          <p>A Fisher depende da posição verdadeira, que não é conhecida. O planejamento usa a estimativa atual e pode errar nas primeiras rodadas. Uma extensão natural é o projeto bayesiano: maximizar a média de \(\log\det F\) sobre a distribuição da posição.</p>
+          <p>Cramér-Rao é um limite assintótico. Com poucas medições, o erro real pode ser maior que a elipse indica, e o app mostra os dois para comparar.</p>
+          <p>O planejamento é guloso (uma rodada à frente) e o gradiente projetado encontra ótimos locais.</p>
+        </div>
+      </article>
+      <aside>
+        <div class="block">
+          <h3>Ligação com a disciplina</h3>
+          <table class="map-course">
+            <thead><tr><th>Aula</th><th>Onde aparece</th></tr></thead>
+            <tbody>
+              <tr><td>Programação não linear</td><td>O problema inteiro: objetivo log det não linear com restrições</td></tr>
+              <tr><td>Lagrange</td><td>Multiplicador λ do alcance da bateria e condições de KKT</td></tr>
+              <tr><td>Gradiente e exemplo</td><td>Subida pelo gradiente analítico de log det F</td></tr>
+              <tr><td>Descida com otimização de comprimento</td><td>Busca de Armijo, comparada com passo fixo</td></tr>
+              <tr><td>Métodos de segunda ordem</td><td>Gauss-Newton e Fisher scoring na estimação</td></tr>
+              <tr><td>Métodos numéricos</td><td>Busca em grade para escapar de ótimos locais</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </aside>
+    </div>
+  </section>
+</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
