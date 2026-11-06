@@ -191,6 +191,18 @@ table.res td:first-child { white-space: nowrap; }
 .theory h2:first-child { margin-top: 0; }
 .theory p, .theory li { margin: 8px 0; }
 .theory .eq { overflow-x: auto; padding: 4px 0; }
+.theory h2 { scroll-margin-top: 16px; }
+.theory h3 { font-family: var(--f-body); font-weight: 500; font-size: 17px; margin: 20px 0 4px; }
+.theory ul { padding-left: 20px; }
+table.doc { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; margin: 10px 0 14px; }
+table.doc caption { caption-side: top; text-align: left; font-size: 13px; color: var(--muted); padding-bottom: 6px; }
+table.doc th, table.doc td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.doc th { font-weight: 500; font-size: 12.5px; color: var(--muted); }
+table.doc td.num { font-family: var(--f-mono); white-space: nowrap; }
+table.doc.wide td:first-child { font-weight: 500; }
+.toc { margin: 0; padding-left: 22px; display: grid; gap: 4px; font-size: 14px; }
+.toc a { color: inherit; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
 .theory aside { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); align-self: start; }
 .map-course { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .map-course td, .map-course th { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -208,6 +220,8 @@ section[hidden] { display: none !important; }
 }
 @media (max-width: 620px) {
   .wrap { padding: 16px 12px max(32px, env(safe-area-inset-bottom)); }
+  table.doc.wide { min-width: 560px; }
+  .theory h3 { font-size: 16px; }
   header.top { margin-bottom: 14px; }
   h1 { font-size: clamp(28px, 10vw, 38px); }
   .lede { font-size: 14px; }

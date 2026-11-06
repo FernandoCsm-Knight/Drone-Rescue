@@ -755,6 +755,13 @@ function init() {
   [$('chartA'), $('chartB'), $('chartC')].forEach(attachHover);
   resetA(); newMission(false); doRound(false); doRound(false);
   document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  // links internos da teoria: rolam até a seção sem trocar o hash da aba
+  document.querySelectorAll('#teoria a[href^="#t-"]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    const el = document.getElementById(a.getAttribute('href').slice(1));
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  document.querySelectorAll('[data-goto-tab]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); showTab(a.dataset.gotoTab); window.scrollTo(0, 0); }));
   const h = (location.hash || '').slice(1);
   showTab(['posicionamento', 'missao', 'comparacao', 'teoria'].includes(h) ? h : 'posicionamento');
   // começa já otimizando para a primeira tela mostrar o método em ação
